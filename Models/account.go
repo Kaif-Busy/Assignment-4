@@ -7,27 +7,17 @@ import (
 	"github.com/go-pg/pg/v10"
 )
 
-type Account struct {
-	ID           uint `pg:",pk"`
-	BranchID     uint `pg:",fk:branches,on_delete:SET NULL"`
-	AccNo        string
-	Balance      float64
-	AccType      string
-	Branch       *Branch        `pg:"rel:has-one"`
-	Transactions []*Transaction `pg:"rel:has-many,on_delete:CASCADE"`
-	Customer     []*Customer    `pg:"many2many:customer_to_accounts"`
-}
-
-func (b *Account) SaveAcc(db *pg.DB) error {
-	_, insertErr := db.Model(b).Returning("*").Insert()
+func (b *Account) SaveAccount(tx *pg.Tx) error {
+	_, insertErr := tx.Model(b).Returning("*").Insert()
 	if insertErr != nil {
 		fmt.Println("Error while inserting new item into DB, Reason: &v\n", insertErr)
+		tx.Rollback()
 		return insertErr
 	}
 
 	return nil
 }
-func ShowAcc(db *pg.DB, id uint) (Account, error) {
+func ShowAccount(db *pg.DB, id uint) (Account, error) {
 	var account Account
 	err := db.Model(&account).Where("id=?0", id).Select()
 	if err != nil {
@@ -37,7 +27,7 @@ func ShowAcc(db *pg.DB, id uint) (Account, error) {
 	return account, nil
 }
 
-func ShowAccBalance(db *pg.DB, id uint) (float64, error) {
+func ShowAccountBalance(db *pg.DB, id uint) (float64, error) {
 	var account Account
 	err := db.Model(&account).Column("balance").Where("id=?0", id).Select()
 	if err != nil {
@@ -47,19 +37,18 @@ func ShowAccBalance(db *pg.DB, id uint) (float64, error) {
 	return account.Balance, nil
 }
 
-func ShowAllAcc(db *pg.DB) ([]Account, error) {
+func ShowAllAccount(db *pg.DB) ([]Account, error) {
 	var accounts []Account
 	err := db.Model(&accounts).Select()
 	if err != nil {
 		fmt.Println("Error in Select")
 		return accounts, err
 	}
-	// fmt.Printf("Successfully ran Select statement for banks %v\n", banks)
 	return accounts, nil
 }
 
-func UpdateAcc(db *pg.DB, b *Account) error {
-	_, err := db.Model(b).Where("id=?0", b.ID).Update()
+func UpdateAccount(db *pg.DB, b *Account) error {
+	_, err := db.Model(b).Where("id=?0", b.ID).UpdateNotZero()
 	if err != nil {
 		fmt.Println("Error in Update")
 		return err
@@ -67,23 +56,25 @@ func UpdateAcc(db *pg.DB, b *Account) error {
 	fmt.Println("Updated.")
 	return nil
 }
-func DeleteAcc(db *pg.DB, id uint) error {
-	_, err := db.Model(&Account{}).Where("id=?0", id).Delete()
-	if err != nil {
+func DeleteAccount(tx *pg.Tx, id uint) error {
+	if _, err := tx.Model(&Account{}).Where("id=?0", id).Delete(); err != nil {
 		fmt.Println("Error in Delete")
+		tx.Rollback()
+		return err
+	}
+	if _, err := tx.Model(&CustomerToAccount{}).Where("account_id=?0", id).Delete(); err != nil {
+		fmt.Println("Error in Delete")
+		tx.Rollback()
 		return err
 	}
 	fmt.Println("Delted.")
 	return nil
 }
 
-func Deposit(db *pg.DB, accountID uint, amount float64) error {
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
+func Deposit(tx *pg.Tx, accountID uint, amount float64) error {
+
 	account := &Account{ID: accountID}
-	err = tx.Model(account).WherePK().Select()
+	err := tx.Model(account).WherePK().Select()
 	if err != nil {
 		tx.Rollback()
 		return err
@@ -92,27 +83,20 @@ func Deposit(db *pg.DB, accountID uint, amount float64) error {
 	_, updateErr := tx.Model(account).WherePK().Update()
 	if updateErr != nil {
 		tx.Rollback()
-		return err
+		return updateErr
 	}
 	var newTrans Transaction
-	newTrans.AccountID=account.ID 
-	newTrans.Mode="Cash"
-	newTrans.Amount=amount
-	newTrans.SaveTransaction(db)
-	commitErr := tx.Commit()
-	if commitErr != nil {
-		return commitErr
-	}
+	newTrans.AccountID = account.ID
+	newTrans.Mode = "Cash"
+	newTrans.Amount = amount
+	newTrans.SaveTransaction(tx)
 	return nil
 }
 
-func Withdraw(db *pg.DB, accountID uint, amount float64) error {
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
+func Withdraw(tx *pg.Tx, accountID uint, amount float64) error {
+
 	account := &Account{ID: accountID}
-	err = tx.Model(account).WherePK().Select()
+	err := tx.Model(account).WherePK().Select()
 	if err != nil {
 		tx.Rollback()
 		return err
@@ -125,16 +109,13 @@ func Withdraw(db *pg.DB, accountID uint, amount float64) error {
 	_, updateErr := tx.Model(account).WherePK().Update()
 	if updateErr != nil {
 		tx.Rollback()
-		return err
+		return updateErr
 	}
 	var newTrans Transaction
-	newTrans.AccountID=account.ID 
-	newTrans.Mode="ATM"
-	newTrans.Amount=-1*amount
-	newTrans.SaveTransaction(db)
-	commitErr := tx.Commit()
-	if commitErr != nil {
-		return commitErr
-	}
+	newTrans.AccountID = account.ID
+	newTrans.Mode = "ATM"
+	newTrans.Amount = -1 * amount
+	newTrans.SaveTransaction(tx)
+
 	return nil
 }

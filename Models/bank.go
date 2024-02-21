@@ -6,14 +6,9 @@ import (
 	"github.com/go-pg/pg/v10"
 )
 
-type Bank struct {
-	//tableName struct{}  `pg:"banks"`
-	ID       uint `pg:",pk"`
-	BankName string
-	Branches []*Branch `pg:"rel:has-many,on_delete:CASCADE"`
-}
 
-func (b *Bank) SaveB(db *pg.DB) error {
+
+func (b *Bank) SaveBank(db *pg.DB) error {
 	_, insertErr := db.Model(b).Returning("*").Insert()
 	if insertErr != nil {
 		fmt.Println("Error while inserting new item into DB, Reason: &v\n", insertErr)
@@ -22,17 +17,24 @@ func (b *Bank) SaveB(db *pg.DB) error {
 
 	return nil
 }
-func ShowB(db *pg.DB, id uint) (Bank, error) {
+func ShowBank(db *pg.DB, id uint) (Bank, error) {
 	var bank Bank
+	var branches []*Branch
 	err := db.Model(&bank).Where("id=?0", id).Select()
 	if err != nil {
 		fmt.Println("Error in Select")
 		return bank, err
 	}
+	err= db.Model(&branches).Where("bank_id=?0",id).Select()
+	if err != nil {
+		fmt.Println("Error in Getting Branches for the bank")
+		return bank, err
+	}
+	bank.Branches=branches
 	return bank, nil
 }
 
-func ShowAllB(db *pg.DB) ([]Bank, error) {
+func ShowAllBank(db *pg.DB) ([]Bank, error) {
 	var banks []Bank
 	err := db.Model(&banks).Select()
 	if err != nil {
@@ -43,8 +45,8 @@ func ShowAllB(db *pg.DB) ([]Bank, error) {
 	return banks, nil
 }
 
-func UpdateB(db *pg.DB, b *Bank) error {
-	_, err := db.Model(b).Where("id=?0", b.ID).Update()
+func UpdateBank(db *pg.DB, b *Bank) error {
+	_, err := db.Model(b).Where("id=?0", b.ID).UpdateNotZero()
 	if err != nil {
 		fmt.Println("Error in Update")
 		return err
@@ -52,7 +54,7 @@ func UpdateB(db *pg.DB, b *Bank) error {
 	fmt.Println("Updated.")
 	return nil
 }
-func DeleteB(db *pg.DB, b *Bank) error {
+func DeleteBank(db *pg.DB, b *Bank) error {
 	_, err := db.Model(b).Where("id=?0", b.ID).Delete()
 	if err != nil {
 		fmt.Println("Error in Delete")
